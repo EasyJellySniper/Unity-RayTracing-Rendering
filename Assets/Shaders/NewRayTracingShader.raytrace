@@ -1,0 +1,145 @@
+﻿#include "RayPayload.cginc"
+
+// define output & AS
+RWTexture2D<float4> _Output;
+RWTexture2D<float4> _ReflectionOutput;
+
+// sample depth texture for saving first ray
+Texture2D _CameraDepthTexture;
+SamplerState sampler_CameraDepthTexture;
+
+// matrix & other variable
+float4x4 _InvViewProj;
+
+// recursion depth define
+#pragma max_recursion_depth 4
+
+struct SceneData
+{
+    float3 world;
+};
+
+SceneData GetSceneData(float2 uv)
+{
+    // get 32-bit scene depth
+    float sceneDepth = _CameraDepthTexture.SampleLevel(sampler_CameraDepthTexture, uv, 0).r;
+
+    // convert depth to world pos
+    float4 clipPos = float4(uv.x * 2.0f - 1.0f,1.0f - uv.y * 2.0f, sceneDepth, 1);
+    float4 wpos = mul(_InvViewProj, clipPos);
+    wpos.xyz /= wpos.w;
+
+    SceneData sd;
+    sd.world = wpos;
+
+    return sd;
+}
+
+void ShootReflectionRay(uint2 dispatchIdx, float3 wpos)
+{
+    // dir to cam
+    float3 eyeToObj = normalize(wpos - _CustomCameraSpacePos.xyz);
+
+    // setup ray
+    RayDesc ray;
+    ray.Origin = _CustomCameraSpacePos.xyz;
+    ray.Direction = eyeToObj;
+    ray.TMin = 0;
+    ray.TMax = length(wpos - _CustomCameraSpacePos.xyz) + 0.01f;
+
+    // prepare payload
+    RayPayload payload = (RayPayload)0;
+    payload.isTestReflection = true;
+    payload.color = 0.0f;
+    payload.reflectionDepth++;
+
+    // reflection ray for opaque
+    TraceRay(_SceneAS, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    _ReflectionOutput[dispatchIdx] = payload.color;
+}
+
+void ShootForwardPassRay(uint2 dispatchIdx, float3 wpos)
+{
+    // setup ray
+    RayDesc ray;
+    ray.Origin = _CustomCameraSpacePos;
+    ray.Direction = normalize(wpos - _CustomCameraSpacePos.xyz);
+    ray.TMin = 0;
+
+     // shoot to depth only, with a small tolerance
+    ray.TMax = length(wpos - _CustomCameraSpacePos.xyz) + 0.01f;
+
+    // prepare payload
+    RayPayload payload = (RayPayload)0;
+    payload.depth = _CustomCameraSpacePos.w;
+
+    // shoot ray for opaque
+    TraceRay(_SceneAS, RAY_FLAG_NONE, 0x01, 0, 1, 0, ray, payload);
+    _Output[dispatchIdx] = payload.color;
+    float4 opaqueColor = payload.color;
+
+    // shoot ray for transparent
+    payload.color = float4(0,0,0,0);
+    TraceRay(_SceneAS, RAY_FLAG_CULL_OPAQUE, 0x02, 0, 1, 0, ray, payload);
+    _Output[dispatchIdx] = lerp(opaqueColor, payload.color, payload.color.a);
+}
+
+// ray generation shader
+[shader("raygeneration")]
+void MyReflectionShader()
+{
+    // keep dispatch ray index
+    uint2 dispatchIdx = DispatchRaysIndex().xy;
+
+    // clear color
+    _ReflectionOutput[dispatchIdx] = float4(0,0,0,0);
+
+    // convert to uv (half-pixel offset rules)
+    float2 uv = (dispatchIdx + 0.5f) / DispatchRaysDimensions().xy;
+
+    // get scene world pos
+    SceneData sd = GetSceneData(uv);
+
+    // reflection pass ray
+    ShootReflectionRay(dispatchIdx, sd.world);
+}
+
+// ray generation shader
+[shader("raygeneration")]
+void MyRaygenShader()
+{
+    // keep dispatch ray index
+    uint2 dispatchIdx = DispatchRaysIndex().xy;
+
+    // clear color
+    _Output[dispatchIdx] = float4(0,0,0,0);
+
+    // convert to uv (half-pixel offset rules)
+    float2 uv = (dispatchIdx + 0.5f) / DispatchRaysDimensions().xy;
+
+    // get scene world pos
+    SceneData sd = GetSceneData(uv);
+
+    // forward pass ray
+    ShootForwardPassRay(dispatchIdx, sd.world);
+}
+
+// closest hit shader, this will not work in Unity, they implement closest hit in .shader pass
+//[shader("closesthit")]
+//void MyClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+//{
+//    
+//}
+
+// miss shader 0 
+[shader("miss")]
+void MyMissShader(inout RayPayload payload)
+{
+    payload.color = RaySky();
+    payload.color.a = 0;
+
+    if (payload.isTestShadow)
+    {
+        payload.shadowAtten = 1.0f;
+    }
+}
