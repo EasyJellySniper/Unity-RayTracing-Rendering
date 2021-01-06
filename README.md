@@ -1,6 +1,7 @@
 # Unity RayTracing Rendering
 A simple demo shows how to customize your ray tracing shader in Unity. <br>
-This demo is written on Unity 2019.4.7f1.
+This demo is written on Unity 2019.4.7f1. <br>
+And this is different work from my D3D12 demo before, this all works with Unity's component without any customized native DLL.
  
 ![Imgur Image](https://i.imgur.com/HIZRbNT.png) <br>
 
