@@ -1,5 +1,6 @@
 # Unity RayTracing Rendering
-A simple demo shows how to customize your ray tracing shader.
+A simple demo shows how to customize your ray tracing shader in Unity.
+This demo is written on Unity 2019.4.7f1.
  
 ![Imgur Image](https://i.imgur.com/HIZRbNT.png) <br>
 
